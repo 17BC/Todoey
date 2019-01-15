@@ -7,38 +7,33 @@
 //
 
 import UIKit
+import CoreData
 
-class TodoListViewController: UITableViewController {
+class TodoListViewController: UITableViewController{
 
     var itemArray = [Item]()
     
+    var selectedCategory : Category?{
+        //this block of code gets called only after selectedCategory has been
+        //given a value
+        didSet{
+            loadItems()
+        }
+    }
+    
+    // For CoreData
+    let context = (UIApplication.shared.delegate as! AppDelegate).persistentContainer.viewContext
+    
+    
     // For NSCoder use
-    let dataFilePath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?.appendingPathComponent("Items.plist")
+//    let dataFilePath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?.appendingPathComponent("Items.plist")
     
     override func viewDidLoad() {
         super.viewDidLoad()
         // Do any additional setup after loading the view, typically from a nib.
         
-        print(dataFilePath)
+        print(FileManager.default.urls(for: .documentDirectory, in: .userDomainMask))
         
-//        let newItem = Item()
-//        newItem.title = "Find Mike"
-//        itemArray.append(newItem)
-//        
-//        let newItem2 = Item()
-//        newItem2.title = "Buy eggs"
-//        itemArray.append(newItem2)
-//        
-//        let newItem3 = Item()
-//        newItem3.title = "Play Guitar"
-//        itemArray.append(newItem3)
-        
-        
-//        if let items = defaults.array(forKey: "TodoListArray") as? [Item]{
-//            itemArray = items
-//        }
-        
-        loadItems()
     }
     
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
@@ -65,7 +60,13 @@ class TodoListViewController: UITableViewController {
         print(itemArray[indexPath.row])
         
         //sets the done property of item, toggles between true or false
-        itemArray[indexPath.row].done = !itemArray[indexPath.row].done
+        // this is also the 'UPDATE' part of 'CRUD'
+        //itemArray[indexPath.row].done = !itemArray[indexPath.row].done
+        
+        //DELETE operation in CRUD
+        //removes the selected item in itemArray and context
+        context.delete(itemArray[indexPath.row])
+        itemArray.remove(at: indexPath.row)
         
         saveItems()
         
@@ -84,8 +85,13 @@ class TodoListViewController: UITableViewController {
             //what happens when the user clicks on the Add Item Button on our UIAlert
             print(textField.text!)
             
-            let newItem = Item()
+            
+            /////// Uses the CoreData ///////////
+            
+            let newItem = Item(context: self.context)
             newItem.title = textField.text!
+            newItem.done = false
+            newItem.parentCategory = self.selectedCategory
             self.itemArray.append(newItem)
             
             self.saveItems()
@@ -102,34 +108,77 @@ class TodoListViewController: UITableViewController {
         present(alert, animated: true, completion: nil)
     }
     
-    // Saves the data to Items.plist
-    // NSCoder lesson
+    // Persists the data into database
     func saveItems(){
-        let encoder = PropertyListEncoder()
         
         do{
-            let data = try encoder.encode(itemArray)
-            try data.write(to: dataFilePath!)
+            try context.save()
         }catch{
-            print("Error encoding items array, \(error)")
+            print("Error saving context, \(error)")
         }
         
         //Adds the item in the tableView
+        self.tableView.reloadData()
+    }
+    
+    
+    // 'READ' operation in CRUD
+    //using the default value Item.fetchRequest(), it allows the user to call
+    //this function without a parameter. It fetches all the data with no filter
+    func loadItems(with request: NSFetchRequest<Item> = Item.fetchRequest(), predicate: NSPredicate? = nil){
+        
+        let categoryPredicate = NSPredicate(format: "parentCategory.name MATCHES %@", selectedCategory!.name!)
+        
+        /*sets the value of request.predicate to NSCompoundPredicate w/c is [categoryPredicate, additionalPredicate], only if additional predicate is not nil
+        */
+        if let additionalPredicate = predicate{
+            request.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [categoryPredicate, additionalPredicate])
+        }else{
+            request.predicate = categoryPredicate
+        }
+        do{
+            itemArray = try context.fetch(request)
+        }catch{
+            print("Error fetching data from context, \(error)")
+        }
+        
         tableView.reloadData()
     }
     
-    //Decodes the data in the form of array of Item type into
-    // itemArray so it will be reflected on the app
-    func loadItems(){
-        if let data = try? Data(contentsOf: dataFilePath!){
-            let decoder = PropertyListDecoder()
-            do{
-                itemArray = try decoder.decode([Item].self, from: data)
-            }catch{
-                print("Decoding item array, \(error)")
-            }
+    
+}
 
+//querying and fetching data from the database
+extension TodoListViewController: UISearchBarDelegate{
+    func searchBarSearchButtonClicked(_ searchBar: UISearchBar) {
+        let request: NSFetchRequest<Item> = Item.fetchRequest()
+        
+        //filter for the request
+        let predicate = NSPredicate(format: "title CONTAINS[cd] %@", searchBar.text!)
+        
+        //format of the returned data, in this case, sorted
+        request.sortDescriptors = [NSSortDescriptor(key: "title", ascending: true)]
+        
+        
+        loadItems(with: request, predicate: predicate)
+        
+    }
+    
+    func searchBar(_ searchBar: UISearchBar, textDidChange searchText: String) {
+        //this method gets triggered for every character typed in the searchbar
+        //only until the user type something in the searchbar that this function will be triggered
+        //that's why we need to check the text count in cases that the user typed something
+        //and then cancelled it
+        if searchBar.text?.count == 0{
+            loadItems()//loads all the items with no filter
+            
+            //updates the state of searchbar in the background
+            DispatchQueue.main.async {
+                searchBar.resignFirstResponder()//takes away the focus on searchbar
+            }
+            
         }
+        
     }
 }
 
